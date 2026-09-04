@@ -466,11 +466,11 @@ def add_home_page(bootinfo, docs):
 
 
 def add_timezone_info(bootinfo):
-	system = bootinfo.sysdefaults.get("time_zone")
 	import frappe.utils.momentjs
 
 	bootinfo.timezone_info = {"zones": {}, "rules": {}, "links": {}}
-	frappe.utils.momentjs.update(system, bootinfo.timezone_info)
+	for time_zone in dict.fromkeys(get_time_zones(bootinfo).values()):
+		frappe.utils.momentjs.update(time_zone, bootinfo.timezone_info)
 
 
 def load_print(bootinfo, doclist):
@@ -567,10 +567,15 @@ def get_link_title_doctypes():
 
 
 def set_time_zone(bootinfo):
-	bootinfo.time_zone = {
-		"system": get_system_timezone(),
+	bootinfo.time_zone = get_time_zones(bootinfo)
+
+
+def get_time_zones(bootinfo):
+	system_timezone = get_system_timezone()
+	return {
+		"system": system_timezone,
 		"user": bootinfo.get("user_info", {}).get(frappe.session.user, {}).get("time_zone", None)
-		or get_system_timezone(),
+		or system_timezone,
 	}
 
 
