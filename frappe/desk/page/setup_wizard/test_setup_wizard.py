@@ -3,7 +3,9 @@
 from unittest.mock import MagicMock, patch
 
 import frappe
+import frappe.defaults
 from frappe.desk.page.setup_wizard import setup_wizard
+from frappe.patches.v16_0.sync_standard_user_timezones import sync_standard_user_timezone
 from frappe.tests import IntegrationTestCase, UnitTestCase, set_user
 from frappe.utils.synchronization import LockTimeoutError
 
@@ -100,3 +102,95 @@ class TestCompleteAppSetup(IntegrationTestCase):
 				self.assertRaises(frappe.ValidationError, setup_wizard.complete_app_setup)
 			with patch.object(frappe, "is_setup_complete", return_value=True):
 				self.assertEqual(setup_wizard.complete_app_setup(), {"status": "ok"})
+
+
+class TestStandardUserTimezone(IntegrationTestCase):
+	def setUp(self):
+		super().setUp()
+		self.original_user_timezones = {
+			user: frappe.db.get_value("User", user, "time_zone") for user in frappe.STANDARD_USERS
+		}
+		self.original_defaults = {
+			user: frappe.db.get_value("DefaultValue", {"parent": user, "defkey": "time_zone"}, "defvalue")
+			for user in frappe.STANDARD_USERS
+		}
+		self.addCleanup(self.restore_standard_user_timezones)
+
+	def restore_standard_user_timezones(self):
+		for user in frappe.STANDARD_USERS:
+			frappe.db.set_value(
+				"User", user, "time_zone", self.original_user_timezones[user], update_modified=False
+			)
+			if self.original_defaults[user] is None:
+				frappe.defaults.clear_default("time_zone", parent=user)
+			else:
+				frappe.defaults.set_default("time_zone", self.original_defaults[user], user)
+
+	def test_set_timezone_updates_standard_user_defaults(self):
+		old_timezone = "Asia/Kolkata"
+		new_timezone = "Africa/Nairobi"
+
+		for user in frappe.STANDARD_USERS:
+			frappe.db.set_value("User", user, "time_zone", old_timezone, update_modified=False)
+			frappe.defaults.set_default("time_zone", old_timezone, user)
+
+		setup_wizard.set_timezone(new_timezone)
+
+		for user in frappe.STANDARD_USERS:
+			self.assertEqual(frappe.db.get_value("User", user, "time_zone"), new_timezone)
+			self.assertEqual(frappe.defaults.get_user_default("time_zone", user), new_timezone)
+
+	def test_update_global_settings_syncs_timezone_inline(self):
+		args = frappe._dict(language="English", timezone="Africa/Nairobi")
+
+		with (
+			patch.object(setup_wizard, "update_system_settings"),
+			patch.object(setup_wizard, "create_or_update_user"),
+			patch.object(setup_wizard, "set_timezone") as set_timezone,
+		):
+			setup_wizard.update_global_settings(args)
+
+		set_timezone.assert_called_once_with("Africa/Nairobi")
+
+	def test_initialize_system_settings_syncs_standard_users(self):
+		system_settings = frappe._dict(setup_complete=0, time_zone="Africa/Nairobi")
+		system_settings.save = lambda: None
+
+		with (
+			patch.object(frappe, "get_single", return_value=system_settings),
+			patch.object(setup_wizard, "create_or_update_user"),
+			patch.object(setup_wizard, "set_timezone") as set_timezone,
+		):
+			setup_wizard.initialize_system_settings_and_user(
+				{
+					"language": "English",
+					"country": "Kenya",
+					"currency": "KES",
+					"time_zone": "Africa/Nairobi",
+				},
+				{"email": "test@example.com"},
+			)
+
+		set_timezone.assert_called_once_with("Africa/Nairobi")
+
+	def test_timezone_patch_replaces_legacy_factory_value(self):
+		user = "Administrator"
+		frappe.db.set_value("User", user, "time_zone", "Asia/Kolkata", update_modified=False)
+		frappe.defaults.set_default("time_zone", "Asia/Kolkata", user)
+
+		sync_standard_user_timezone(user, "Africa/Nairobi")
+		sync_standard_user_timezone(user, "Africa/Nairobi")
+
+		self.assertEqual(frappe.db.get_value("User", user, "time_zone"), "Africa/Nairobi")
+		self.assertEqual(frappe.defaults.get_user_default("time_zone", user), "Africa/Nairobi")
+
+	def test_timezone_patch_preserves_explicit_user_timezone(self):
+		user = "Administrator"
+		user_timezone = "America/New_York"
+		frappe.db.set_value("User", user, "time_zone", user_timezone, update_modified=False)
+		frappe.defaults.set_default("time_zone", "Asia/Kolkata", user)
+
+		sync_standard_user_timezone(user, "Africa/Nairobi")
+
+		self.assertEqual(frappe.db.get_value("User", user, "time_zone"), user_timezone)
+		self.assertEqual(frappe.defaults.get_user_default("time_zone", user), user_timezone)

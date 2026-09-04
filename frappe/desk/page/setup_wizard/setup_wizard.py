@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 import frappe
+import frappe.defaults
 from frappe import _
 from frappe.app_state import clear_cache_after_maintenance
 from frappe.core.doctype.installed_applications.installed_applications import get_setup_wizard_completed_apps
@@ -151,6 +152,7 @@ def initialize_system_settings_and_user(
 		}
 	)
 	system_settings.save()
+	set_timezone(system_settings.time_zone)
 
 	user_data = parse_args(sanitize_input(user_data))
 	create_or_update_user(user_data)
@@ -250,7 +252,7 @@ def update_global_settings(args):  # nosemgrep
 
 	update_system_settings(args)
 	create_or_update_user(args)
-	frappe.enqueue(set_timezone, timezone=args.get("timezone"))
+	set_timezone(args.get("timezone"))
 
 
 def apply_telemetry_preference(telemetry_enabled):
@@ -414,7 +416,15 @@ def create_or_update_user(args):  # nosemgrep
 def set_timezone(timezone=None):
 	if not timezone:
 		return
-	frappe.db.set_value("User", {"name": ("in", frappe.STANDARD_USERS)}, "time_zone", timezone)
+
+	for user in frappe.STANDARD_USERS:
+		set_user_timezone(user, timezone)
+
+
+def set_user_timezone(user, timezone):
+	frappe.db.set_value("User", user, "time_zone", timezone)
+	# db.set_value bypasses User.on_update, so sync the per-user default explicitly.
+	frappe.defaults.set_default("time_zone", timezone, user)
 
 
 def parse_args(args):  # nosemgrep
