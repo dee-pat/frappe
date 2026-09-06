@@ -173,24 +173,21 @@ class TestStandardUserTimezone(IntegrationTestCase):
 
 		set_timezone.assert_called_once_with("Africa/Nairobi")
 
-	def test_timezone_patch_replaces_legacy_factory_value(self):
+	def test_timezone_patch_repairs_defaults_and_preserves_overrides(self):
 		user = "Administrator"
-		frappe.db.set_value("User", user, "time_zone", "Asia/Kolkata", update_modified=False)
-		frappe.defaults.set_default("time_zone", "Asia/Kolkata", user)
+		for user_timezone, default_timezone, expected in (
+			("Asia/Kolkata", "Asia/Kolkata", "Africa/Nairobi"),
+			("America/New_York", "Asia/Kolkata", "America/New_York"),
+			("", "Asia/Kolkata", "Africa/Nairobi"),
+			(None, "", "Africa/Nairobi"),
+			("", "America/New_York", "America/New_York"),
+		):
+			with self.subTest(user_timezone=user_timezone, default_timezone=default_timezone):
+				frappe.db.set_value("User", user, "time_zone", user_timezone, update_modified=False)
+				frappe.defaults.set_default("time_zone", default_timezone, user)
 
-		sync_standard_user_timezone(user, "Africa/Nairobi")
-		sync_standard_user_timezone(user, "Africa/Nairobi")
+				sync_standard_user_timezone(user, "Africa/Nairobi")
+				sync_standard_user_timezone(user, "Africa/Nairobi")
 
-		self.assertEqual(frappe.db.get_value("User", user, "time_zone"), "Africa/Nairobi")
-		self.assertEqual(frappe.defaults.get_user_default("time_zone", user), "Africa/Nairobi")
-
-	def test_timezone_patch_preserves_explicit_user_timezone(self):
-		user = "Administrator"
-		user_timezone = "America/New_York"
-		frappe.db.set_value("User", user, "time_zone", user_timezone, update_modified=False)
-		frappe.defaults.set_default("time_zone", "Asia/Kolkata", user)
-
-		sync_standard_user_timezone(user, "Africa/Nairobi")
-
-		self.assertEqual(frappe.db.get_value("User", user, "time_zone"), user_timezone)
-		self.assertEqual(frappe.defaults.get_user_default("time_zone", user), user_timezone)
+				self.assertEqual(frappe.db.get_value("User", user, "time_zone"), expected)
+				self.assertEqual(frappe.defaults.get_user_default("time_zone", user), expected)

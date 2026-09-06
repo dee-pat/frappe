@@ -19,9 +19,9 @@ def sync_standard_user_timezone(user, system_timezone):
 		"DefaultValue", {"parent": user, "defkey": "time_zone"}, "defvalue"
 	)
 
-	if user_timezone not in (None, LEGACY_TIME_ZONE):
+	if user_timezone not in (None, "", LEGACY_TIME_ZONE):
 		timezone = user_timezone
-	elif default_timezone not in (None, LEGACY_TIME_ZONE):
+	elif default_timezone not in (None, "", LEGACY_TIME_ZONE):
 		timezone = default_timezone
 	else:
 		timezone = system_timezone
